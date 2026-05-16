@@ -1,66 +1,120 @@
 # Fitness & Motivation Caption Generator
 
-A pipeline that scrapes YouTube and Instagram data, preprocesses it into instruction-tuning format, fine-tunes Microsoft Phi-2 with QLoRA 4-bit quantization, and generates platform-formatted captions for Instagram and Facebook posts.
+A pipeline that scrapes YouTube and Instagram data, cleans it, fine-tunes Microsoft Phi-2 with QLoRA 4-bit quantization, and generates platform-formatted captions for Instagram and Facebook posts.
 
 ---
 
-## Running on a GPU Machine
+## File Overview
 
-The fine-tuning script requires a CUDA GPU (minimum 8 GB VRAM recommended; 6 GB possible with batch size 1).
+| File | What it does |
+|---|---|
+| `scrape_youtube.py` | Calls YouTube API and saves raw video data |
+| `combine_instagram.py` | Merges all raw Instagram JSON files into one |
+| `clean_instagram.py` | Cleans Instagram data into a reviewable JSON file |
+| `instagram_to_jsonl.py` | Converts reviewed Instagram JSON to JSONL |
+| `youtube_to_jsonl.py` | Cleans YouTube CSV into JSONL |
+| `merge_datasets.py` | Merges both JSONL files into train/val splits |
+| `train_model.py` | Fine-tunes Phi-2 on the merged dataset |
+| `generate_caption.py` | Generates a caption from a text prompt |
+| `validate_output.py` | Utility — checks caption format (word count, hashtags) |
+| `config.py` | Shared config (API key, search queries) |
 
-### 1. Install PyTorch with CUDA
+**Data files produced at each step:**
 
-Run this **before** `requirements.txt` — replace `cu121` with your CUDA version (`cu118` for CUDA 11.8):
+| File | Produced by |
+|---|---|
+| `youtube_raw.csv` | `scrape_youtube.py` |
+| `insta-dataset/combined_dataset.json` | `combine_instagram.py` |
+| `insta_clean.json` | `clean_instagram.py` ← **review this before next step** |
+| `youtube_clean.json` | manually curated ← **review this before next step** |
+| `instagram_ready.jsonl` | `instagram_to_jsonl.py` |
+| `youtube_ready.jsonl` | `youtube_to_jsonl.py` |
+| `train.jsonl` | `merge_datasets.py` |
+| `val.jsonl` | `merge_datasets.py` |
+| `phi2-caption-finetuned/` | `train_model.py` |
 
-```bash
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+---
+
+## Pipeline Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        DATA COLLECTION                              │
+│                                                                     │
+│  scrape_youtube.py          insta-dataset/data-insta-*.json         │
+│        │                           │                                │
+│        ▼                           ▼                                │
+│  youtube_raw.csv          combine_instagram.py                      │
+│                                    │                                │
+│                                    ▼                                │
+│                         combined_dataset.json                       │
+└─────────────────────────────────────────────────────────────────────┘
+                │                           │
+                ▼                           ▼
+┌──────────────────────────┐   ┌──────────────────────────────────────┐
+│      YOUTUBE CLEAN       │   │         INSTAGRAM CLEAN              │
+│                          │   │                                      │
+│  youtube_to_jsonl.py     │   │  clean_instagram.py                  │
+│        │                 │   │        │                             │
+│        ▼                 │   │        ▼                             │
+│  youtube_ready.jsonl     │   │  insta_clean.json  ← REVIEW HERE     │
+│                          │   │        │                             │
+│                          │   │  instagram_to_jsonl.py               │
+│                          │   │        │                             │
+│                          │   │        ▼                             │
+│                          │   │  instagram_ready.jsonl               │
+└──────────────────────────┘   └──────────────────────────────────────┘
+                │                           │
+                └───────────┬───────────────┘
+                            ▼
+              ┌─────────────────────────────┐
+              │         MERGE               │
+              │                             │
+              │     merge_datasets.py       │
+              │           │                 │
+              │    ┌──────┴──────┐          │
+              │    ▼             ▼          │
+              │ train.jsonl   val.jsonl     │
+              └─────────────────────────────┘
+                            │
+                            ▼
+              ┌─────────────────────────────┐
+              │        FINE-TUNE            │
+              │                             │
+              │      train_model.py         │
+              │           │                 │
+              │           ▼                 │
+              │  phi2-caption-finetuned/    │
+              └─────────────────────────────┘
+                            │
+                            ▼
+              ┌─────────────────────────────┐
+              │        GENERATE             │
+              │                             │
+              │    generate_caption.py      │
+              │           │                 │
+              │           ▼                 │
+              │     caption on stdout       │
+              └─────────────────────────────┘
 ```
 
-Verify CUDA is available:
+---
 
-```bash
-python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"
-```
-
-### 2. Install remaining dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-### 3. Copy the dataset files
-
-Copy these files from this machine to the GPU machine (same directory):
+## Quick Start — Run Order
 
 ```
-train.jsonl
-val.jsonl
-finetune_phi2.py
+Step 1:  python scrape_youtube.py
+Step 2:  python combine_instagram.py
+Step 3:  python clean_instagram.py
+         → open insta_clean.json and review/edit
+Step 4:  python instagram_to_jsonl.py
+Step 5:  python youtube_to_jsonl.py
+Step 6:  python merge_datasets.py
+Step 7:  python train_model.py          ← needs a CUDA GPU
+Step 8:  python generate_caption.py --prompt "your text" --model-dir ./phi2-caption-finetuned
 ```
 
-### 4. Run fine-tuning
-
-Default run (3 epochs, batch size 4, gradient accumulation 4 = effective batch 16):
-
-```bash
-python finetune_phi2.py
-```
-
-For a GPU with less VRAM (6–8 GB), reduce batch size:
-
-```bash
-python finetune_phi2.py --per-device-train-batch-size 1 --gradient-accumulation-steps 16
-```
-
-Output: `phi2-caption-finetuned/` (LoRA adapter) and `phi2-caption-finetuned-merged/` (merged model).
-
-### 5. Copy adapter weights back
-
-After training, copy `phi2-caption-finetuned/` back to this machine and run inference:
-
-```bash
-python generate_caption.py --prompt "Push through the pain" --model-dir ./phi2-caption-finetuned
-```
+Steps 4 and 5 are independent — you can run them in either order.
 
 ---
 
@@ -78,8 +132,6 @@ Python **3.10 or higher** is required.
 | System RAM | 8 GB |
 
 ### Dependencies
-
-Install all required packages with pip:
 
 ```bash
 pip install transformers datasets peft bitsandbytes torch accelerate trl tqdm pandas requests langdetect
@@ -101,260 +153,255 @@ pip install transformers datasets peft bitsandbytes torch accelerate trl tqdm pa
 
 ---
 
-## Pipeline Overview
+## Running on a GPU Machine
 
-The pipeline is a linear sequence of standalone scripts. Each script reads from files on disk and writes to files on disk, making every stage independently runnable.
+The fine-tuning step requires a CUDA GPU (minimum 8 GB VRAM recommended; 6 GB possible with batch size 1).
 
-```
-youtube_scraper.py  ──► youtube_raw.csv
-                                        \
-insta-dataset/data-insta-*.json          ──► merge_datasets.py ──► train.jsonl
-  └─► combine_instagram.py                                      └─► val.jsonl
-        └─► preprocess_instagram.py ──► instagram_processed.jsonl      │
-preprocess_youtube.py ──► youtube_processed.jsonl ──────────────────────┘
-                                                                        │
-                                                              finetune_phi2.py
-                                                                        │
-                                                          phi2-caption-finetuned/
-                                                                        │
-                                                           generate_caption.py
-                                                                        │
-                                                                   stdout caption
-```
+> **No local GPU?** You can use [Kaggle Notebooks](https://www.kaggle.com/code) for free GPU access (T4 x2 recommended). Upload `train.jsonl`, `val.jsonl`, and `train_model.py` as a Kaggle Dataset, attach it to a notebook, set the accelerator to **GPU T4 x2**, and run `python train_model.py` with the full file paths.
 
-**Stage summary:**
+### 1. Install PyTorch with CUDA
 
-| Stage | Script | Input | Output |
-|---|---|---|---|
-| Scrape | `youtube_scraper.py` | YouTube Data API | `youtube_raw.csv` |
-| Combine | `combine_instagram.py` | `insta-dataset/data-insta-*.json` | `insta-dataset/combined_dataset.json` |
-| Preprocess Instagram | `preprocess_instagram.py` | `insta-dataset/combined_dataset.json` | `instagram_processed.jsonl` |
-| Preprocess YouTube | `preprocess_youtube.py` | `youtube_raw.csv` | `youtube_processed.jsonl` |
-| Merge | `merge_datasets.py` | `youtube_processed.jsonl` + `instagram_processed.jsonl` | `train.jsonl` + `val.jsonl` |
-| Fine-tune | `finetune_phi2.py` | `train.jsonl` + `val.jsonl` | `phi2-caption-finetuned/` |
-| Generate | `generate_caption.py` | `phi2-caption-finetuned/` + `--prompt` | stdout |
-
----
-
-## API Key Setup
-
-The YouTube scraper requires a YouTube Data API v3 key. The key is read from the `YOUTUBE_API_KEY` environment variable at runtime and must never be committed to version control.
-
-### Obtain a YouTube Data API key
-
-1. Go to [https://console.developers.google.com/](https://console.developers.google.com/)
-2. Create a new project (or select an existing one).
-3. Navigate to **APIs & Services → Library** and enable the **YouTube Data API v3**.
-4. Navigate to **APIs & Services → Credentials** and click **Create Credentials → API key**.
-5. Copy the generated key.
-
-### Set the environment variable
-
-**Option 1 — export in your shell session (temporary):**
+Run this **before** `requirements.txt` — replace `cu121` with your CUDA version (`cu118` for CUDA 11.8):
 
 ```bash
-export YOUTUBE_API_KEY=your-actual-api-key-here
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 ```
 
-This applies only to the current terminal session.
-
-**Option 2 — `.env` file (persistent, recommended):**
-
-Copy the provided example file and fill in your key:
+Verify CUDA is available:
 
 ```bash
-cp .env.example .env
+python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"
 ```
 
-Then open `.env` and replace the placeholder value:
-
-```
-YOUTUBE_API_KEY=your-actual-api-key-here
-```
-
-Load the file before running the scraper (if your shell does not auto-load `.env`):
+### 2. Install remaining dependencies
 
 ```bash
-export $(grep -v '^#' .env | xargs)
+pip install -r requirements.txt
 ```
 
-> **Note:** `.env` is listed in `.gitignore` and will not be committed to version control. Never commit your real API key.
+### 3. Copy dataset files to the GPU machine
 
----
+```
+train.jsonl
+val.jsonl
+train_model.py
+```
 
-## Pipeline Steps
-
-### Step 1 — YouTube Scraping (`youtube_scraper.py`)
-
-**Purpose:** Query the YouTube Data API v3 for fitness/motivation videos and save their titles and descriptions to a CSV file.
-
-**Input:** YouTube Data API v3 (requires `YOUTUBE_API_KEY` environment variable set)
-
-**Output:** `youtube_raw.csv`
-
-**Command (default arguments):**
+### 4. Run fine-tuning
 
 ```bash
-python youtube_scraper.py
+python train_model.py
 ```
 
-There are no optional CLI arguments for this script. The output path is fixed to `youtube_raw.csv`. Search queries are configured in `config.py` via the `SEARCH_QUERIES` list.
-
----
-
-### Step 2 — Instagram Data Consolidation (`combine_instagram.py`)
-
-**Purpose:** Merge all raw Instagram JSON files from `insta-dataset/` into a single deduplicated JSON array.
-
-**Input:** `insta-dataset/data-insta-*.json` (all files matching the glob pattern)
-
-**Output:** `insta-dataset/combined_dataset.json`
-
-**Command (default arguments):**
+For a GPU with less VRAM (6–8 GB):
 
 ```bash
-python combine_instagram.py
+python train_model.py --per-device-train-batch-size 1 --gradient-accumulation-steps 16
 ```
 
-**Optional arguments:**
+Output: `phi2-caption-finetuned/` (LoRA adapter) and `phi2-caption-finetuned-merged/` (merged model).
 
-| Argument | Default | Description |
-|---|---|---|
-| `--base-dir` | `insta-dataset` | Directory containing the source `data-insta-*.json` files |
-| `--output` | `insta-dataset/combined_dataset.json` | Output file path |
-
----
-
-### Step 3 — Instagram Preprocessing (`preprocess_instagram.py`)
-
-**Purpose:** Clean and filter the combined Instagram JSON into instruction-tuning JSONL records, extracting captions and keywords.
-
-**Input:** `insta-dataset/combined_dataset.json`
-
-**Output:** `instagram_processed.jsonl`
-
-**Command (default arguments):**
-
-```bash
-python preprocess_instagram.py
-```
-
-**Optional arguments:**
-
-| Argument | Default | Description |
-|---|---|---|
-| `--input` | `instagram_data.json` | Input JSON file path |
-| `--output` | `instagram_processed.jsonl` | Output JSONL file path |
-
-> **Note:** When running after Step 2, pass `--input insta-dataset/combined_dataset.json` explicitly:
-> ```bash
-> python preprocess_instagram.py --input insta-dataset/combined_dataset.json
-> ```
-
----
-
-### Step 4 — YouTube Preprocessing (`preprocess_youtube.py`)
-
-**Purpose:** Clean and filter the raw YouTube CSV into instruction-tuning JSONL records, extracting captions and hashtag keywords from titles and descriptions.
-
-**Input:** `youtube_raw.csv`
-
-**Output:** `youtube_processed.jsonl`
-
-**Command (default arguments):**
-
-```bash
-python preprocess_youtube.py
-```
-
-**Optional arguments:**
-
-| Argument | Default | Description |
-|---|---|---|
-| `--input` | `youtube_raw.csv` | Input CSV file path |
-| `--output` | `youtube_processed.jsonl` | Output JSONL file path |
-
----
-
-### Step 5 — Dataset Merging (`merge_datasets.py`)
-
-**Purpose:** Merge the YouTube and Instagram JSONL files, deduplicate by output text, shuffle, and split into training and validation sets.
-
-**Input:** `youtube_processed.jsonl`, `instagram_processed.jsonl`
-
-**Output:** `train.jsonl`, `val.jsonl`
-
-**Command (default arguments):**
-
-```bash
-python merge_datasets.py
-```
-
-**Optional arguments:**
-
-| Argument | Default | Description |
-|---|---|---|
-| `--youtube` | `youtube_processed.jsonl` | Path to the processed YouTube JSONL file |
-| `--instagram` | `instagram_processed.jsonl` | Path to the processed Instagram JSONL file |
-| `--train-output` | `train.jsonl` | Output path for the training split |
-| `--val-output` | `val.jsonl` | Output path for the validation split |
-| `--seed` | `42` | Random seed for shuffling |
-| `--train-ratio` | `0.90` | Fraction of records assigned to the training split (must be between 0 and 1) |
-
----
-
-### Step 6 — Fine-Tuning (`finetune_phi2.py`)
-
-**Purpose:** Fine-tune `microsoft/phi-2` on the merged dataset using QLoRA 4-bit quantization and save the LoRA adapter weights.
-
-**Input:** `train.jsonl`, `val.jsonl`
-
-**Output:** `phi2-caption-finetuned/` (LoRA adapter weights and tokenizer)
-
-**Command (default arguments):**
-
-```bash
-python finetune_phi2.py
-```
-
-**Optional arguments:**
-
-| Argument | Default | Description |
-|---|---|---|
-| `--train-file` | `train.jsonl` | Path to the training JSONL file |
-| `--val-file` | `val.jsonl` | Path to the validation JSONL file |
-| `--output-dir` | `./phi2-caption-finetuned` | Directory to save the LoRA adapter and tokenizer |
-| `--merged-output-dir` | `./phi2-caption-finetuned-merged` | Directory to save the merged base+adapter model |
-| `--max-length` | `768` | Maximum token sequence length for training |
-| `--num-train-epochs` | `3` | Number of training epochs |
-| `--per-device-train-batch-size` | `4` | Per-device training batch size |
-| `--gradient-accumulation-steps` | `4` | Number of gradient accumulation steps |
-| `--learning-rate` | `2e-4` | Learning rate |
-| `--logging-steps` | `50` | Number of steps between training log entries |
-| `--skip-merge` | _(flag, off by default)_ | Skip saving the merged base+adapter weights after training |
-
----
-
-### Step 7 — Caption Generation (`generate_caption.py`)
-
-**Purpose:** Load the fine-tuned Phi-2 model and generate a platform-formatted caption (30–40 words + 5 hashtags) from a text prompt.
-
-**Input:** `phi2-caption-finetuned/` (LoRA adapter directory or merged model directory), `--prompt` text
-
-**Output:** Formatted caption printed to stdout
-
-**Command (default arguments):**
+### 5. Copy adapter weights back and run inference
 
 ```bash
 python generate_caption.py --prompt "Push through the pain" --model-dir ./phi2-caption-finetuned
 ```
 
-**Optional arguments:**
+---
+
+## API Key Setup
+
+The YouTube scraper requires a YouTube Data API v3 key stored in the `YOUTUBE_API_KEY` environment variable.
+
+### Get a key
+
+1. Go to [https://console.developers.google.com/](https://console.developers.google.com/)
+2. Create or select a project.
+3. Enable the **YouTube Data API v3**.
+4. Create an **API key** under Credentials.
+
+### Set the key
+
+**Option 1 — shell session (temporary):**
+
+```bash
+export YOUTUBE_API_KEY=your-actual-api-key-here
+```
+
+**Option 2 — `.env` file (recommended):**
+
+```bash
+cp .env.example .env
+# edit .env and set YOUTUBE_API_KEY=your-actual-api-key-here
+```
+
+> `.env` is in `.gitignore` — it will never be committed.
+
+---
+
+## Pipeline Steps
+
+### Step 1 — Scrape YouTube (`scrape_youtube.py`)
+
+Queries the YouTube Data API for fitness/motivation videos and saves titles and descriptions to a CSV.
+
+**Input:** YouTube Data API v3 (needs `YOUTUBE_API_KEY`)  
+**Output:** `youtube_raw.csv`
+
+```bash
+python scrape_youtube.py
+```
+
+No CLI arguments. Search queries are configured in `config.py`.
+
+---
+
+### Step 2 — Combine Instagram files (`combine_instagram.py`)
+
+Merges all `insta-dataset/data-insta-*.json` files into a single deduplicated JSON array.
+
+**Input:** `insta-dataset/data-insta-*.json`  
+**Output:** `insta-dataset/combined_dataset.json`
+
+```bash
+python combine_instagram.py
+```
 
 | Argument | Default | Description |
 |---|---|---|
-| `--prompt` | _(required)_ | User prompt text to base the caption on |
-| `--model-dir` | _(required)_ | Path to the LoRA adapter directory or merged model directory |
+| `--base-dir` | `insta-dataset` | Folder containing the source JSON files |
+| `--output` | `insta-dataset/combined_dataset.json` | Output file path |
+
+---
+
+### Step 3 — Clean Instagram data (`clean_instagram.py`)
+
+Filters and cleans the combined Instagram JSON into a reviewable `insta_clean.json` — same `instruction / input / output` format as `youtube_clean.json`. **Open and edit this file before Step 4.**
+
+**Input:** `insta-dataset/combined_dataset.json`  
+**Output:** `insta_clean.json`
+
+```bash
+python clean_instagram.py
+```
+
+| Argument | Default | Description |
+|---|---|---|
+| `--input` | `insta-dataset/combined_dataset.json` | Input combined JSON |
+| `--output` | `insta_clean.json` | Output clean JSON |
+
+> Open `insta_clean.json` and remove or fix any records that look wrong before running Step 4.
+
+---
+
+### Step 4 — Convert Instagram to JSONL (`instagram_to_jsonl.py`)
+
+Converts the reviewed `insta_clean.json` into `instagram_ready.jsonl` (one JSON record per line).
+
+**Input:** `insta_clean.json`  
+**Output:** `instagram_ready.jsonl`
+
+```bash
+python instagram_to_jsonl.py
+```
+
+| Argument | Default | Description |
+|---|---|---|
+| `--input` | `insta_clean.json` | Input clean JSON |
+| `--output` | `instagram_ready.jsonl` | Output JSONL |
+
+---
+
+### Step 5 — Convert YouTube to JSONL (`youtube_to_jsonl.py`)
+
+Cleans the raw YouTube CSV and writes instruction-tuning JSONL records.
+
+**Input:** `youtube_raw.csv`  
+**Output:** `youtube_ready.jsonl`
+
+```bash
+python youtube_to_jsonl.py
+```
+
+| Argument | Default | Description |
+|---|---|---|
+| `--input` | `youtube_raw.csv` | Input CSV |
+| `--output` | `youtube_ready.jsonl` | Output JSONL |
+
+> Steps 4 and 5 are independent — run them in either order.
+
+---
+
+### Step 6 — Merge datasets (`merge_datasets.py`)
+
+Merges YouTube and Instagram JSONL files, deduplicates by output text, shuffles, and splits into train/val.
+
+**Input:** `youtube_ready.jsonl` + `instagram_ready.jsonl`  
+**Output:** `train.jsonl` + `val.jsonl`
+
+```bash
+python merge_datasets.py
+```
+
+| Argument | Default | Description |
+|---|---|---|
+| `--youtube` | `youtube_ready.jsonl` | YouTube JSONL path |
+| `--instagram` | `instagram_ready.jsonl` | Instagram JSONL path |
+| `--train-output` | `train.jsonl` | Training split output |
+| `--val-output` | `val.jsonl` | Validation split output |
+| `--seed` | `42` | Random seed for shuffling |
+| `--train-ratio` | `0.90` | Fraction assigned to training (0–1) |
+
+---
+
+### Step 7 — Fine-tune the model (`train_model.py`)
+
+Fine-tunes `microsoft/phi-2` on the merged dataset using QLoRA 4-bit quantization. **Requires a CUDA GPU.**
+
+**Input:** `train.jsonl` + `val.jsonl`  
+**Output:** `phi2-caption-finetuned/` (LoRA adapter weights)
+
+```bash
+python train_model.py
+```
+
+For lower VRAM (6–8 GB):
+
+```bash
+python train_model.py --per-device-train-batch-size 1 --gradient-accumulation-steps 16
+```
+
+| Argument | Default | Description |
+|---|---|---|
+| `--train-file` | `train.jsonl` | Training JSONL |
+| `--val-file` | `val.jsonl` | Validation JSONL |
+| `--output-dir` | `./phi2-caption-finetuned` | LoRA adapter output |
+| `--merged-output-dir` | `./phi2-caption-finetuned-merged` | Merged model output |
+| `--max-length` | `768` | Max token sequence length |
+| `--num-train-epochs` | `3` | Training epochs |
+| `--per-device-train-batch-size` | `4` | Batch size per device |
+| `--gradient-accumulation-steps` | `4` | Gradient accumulation steps |
+| `--learning-rate` | `2e-4` | Learning rate |
+| `--logging-steps` | `50` | Steps between log entries |
+| `--skip-merge` | _(flag)_ | Skip saving merged weights |
+
+---
+
+### Step 8 — Generate a caption (`generate_caption.py`)
+
+Loads the fine-tuned model and generates a caption from a text prompt.
+
+**Input:** `phi2-caption-finetuned/` + `--prompt`  
+**Output:** Caption printed to stdout
+
+```bash
+python generate_caption.py --prompt "Push through the pain" --model-dir ./phi2-caption-finetuned
+```
+
+| Argument | Default | Description |
+|---|---|---|
+| `--prompt` | _(required)_ | Text prompt for the caption |
+| `--model-dir` | _(required)_ | LoRA adapter or merged model directory |
 | `--platform` | `instagram` | Target platform: `instagram` or `facebook` |
 
 **Example output:**
