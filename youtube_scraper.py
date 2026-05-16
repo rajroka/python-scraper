@@ -1,6 +1,6 @@
 import requests
 import pandas as pd
-from config import API_KEY, SEARCH_QUERIES
+from config import get_api_key, SEARCH_QUERIES
 
 
 
@@ -12,7 +12,7 @@ def search_videos(query, max_results=50):
         "q": query,
         "maxResults": max_results,
         "type": "video",
-        "key": API_KEY
+        "key": get_api_key()
     }
     response = requests.get(url, params=params)
     return response.json().get("items", [])
@@ -23,7 +23,7 @@ def get_video_description(video_id):
     params = {
         "part": "snippet",
         "id": video_id,
-        "key": API_KEY
+        "key": get_api_key()
     }
     response = requests.get(url, params=params)
     items = response.json().get("items", [])

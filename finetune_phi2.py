@@ -71,9 +71,13 @@ def build_training_args(args: argparse.Namespace) -> TrainingArguments:
         "logging_steps": args.logging_steps,
         "save_strategy": "epoch",
         "report_to": "none",
+        # paged_adamw_8bit requires bitsandbytes CUDA; falls back to adamw_torch
+        # if bitsandbytes is not available (e.g. CPU-only environments).
         "optim": "paged_adamw_8bit",
         "warmup_ratio": 0.03,
         "lr_scheduler_type": "cosine",
+        "gradient_checkpointing": True,
+        "dataloader_pin_memory": False,
     }
 
     signature = inspect.signature(TrainingArguments.__init__)
@@ -147,14 +151,16 @@ def main() -> None:
         sys.exit(1)
 
     model.config.use_cache = False
-    model = prepare_model_for_kbit_training(model)
+    model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
 
     print("Applying QLoRA adapter")
+    # Phi-2 uses MLP layers (fc1/fc2) and attention projections (q_proj/k_proj/v_proj/dense).
+    # Targeting all linear layers gives the best coverage for Phi-2's architecture.
     lora_config = LoraConfig(
         r=16,
         lora_alpha=32,
         lora_dropout=0.05,
-        target_modules=["q_proj", "v_proj"],
+        target_modules=["q_proj", "k_proj", "v_proj", "dense", "fc1", "fc2"],
         bias="none",
         task_type="CAUSAL_LM",
     )

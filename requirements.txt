@@ -1,0 +1,21 @@
+# ── Core ML stack ──────────────────────────────────────────────────────────────
+# Install PyTorch with CUDA FIRST (before this file) using the command below.
+# Replace cu121 with your CUDA version (cu118 for CUDA 11.8, cu121 for 12.1, etc.)
+#
+#   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+#
+# Then install the rest:
+#   pip install -r requirements.txt
+
+transformers>=4.40.0,<5.4.0
+datasets>=2.18.0
+peft>=0.10.0
+bitsandbytes>=0.43.0
+accelerate>=0.29.0
+trl>=0.8.0
+
+# ── Data / scraping ─────────────────────────────────────────────────────────────
+pandas>=2.0.0
+requests>=2.31.0
+langdetect>=1.0.9
+tqdm>=4.66.0

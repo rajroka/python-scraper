@@ -28,6 +28,31 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+REQUIRED_KEYS = ("instruction", "input", "output")
+
+
+def validate_record(record: dict, source_path: Path, line_number: int) -> bool:
+    """Return True if record has all required keys with non-whitespace values.
+
+    Logs a warning to stderr with source_path and line_number on failure.
+    Required keys: 'instruction', 'input', 'output'.
+    """
+    for key in REQUIRED_KEYS:
+        if key not in record:
+            print(
+                f"WARNING: Skipping record in {source_path} line {line_number}: missing key '{key}'",
+                file=sys.stderr,
+            )
+            return False
+        if not str(record[key]).strip():
+            print(
+                f"WARNING: Skipping record in {source_path} line {line_number}: empty value for key '{key}'",
+                file=sys.stderr,
+            )
+            return False
+    return True
+
+
 def load_jsonl(path: Path) -> list[dict[str, str]]:
     records: list[dict[str, str]] = []
     try:
@@ -41,7 +66,7 @@ def load_jsonl(path: Path) -> list[dict[str, str]]:
                 except json.JSONDecodeError as exc:
                     print(f"WARNING: Skipping invalid JSON in {path} line {line_number}: {exc}")
                     continue
-                if isinstance(record, dict):
+                if isinstance(record, dict) and validate_record(record, path, line_number):
                     records.append(record)
     except FileNotFoundError:
         print(f"ERROR: Could not find input file: {path.resolve()}", file=sys.stderr)
@@ -74,6 +99,15 @@ def main() -> None:
     combined = youtube_records + instagram_records
     print(f"Loaded {len(youtube_records)} YouTube records")
     print(f"Loaded {len(instagram_records)} Instagram records")
+
+    if len(combined) == 0:
+        print(
+            "WARNING: No valid records found after filtering. Output files will be empty.",
+            file=sys.stderr,
+        )
+        write_jsonl(args.train_output, [])
+        write_jsonl(args.val_output, [])
+        sys.exit(0)
 
     deduped: list[dict[str, str]] = []
     seen_outputs: set[str] = set()
