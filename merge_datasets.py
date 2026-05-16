@@ -19,8 +19,8 @@ except ImportError:  # pragma: no cover
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Merge processed YouTube and Instagram JSONL files.")
-    parser.add_argument("--youtube", type=Path, default=Path("youtube_processed.jsonl"))
-    parser.add_argument("--instagram", type=Path, default=Path("instagram_processed.jsonl"))
+    parser.add_argument("--youtube", type=Path, default=Path("youtube_ready.jsonl"))
+    parser.add_argument("--instagram", type=Path, default=Path("instagram_ready.jsonl"))
     parser.add_argument("--train-output", type=Path, default=Path("train.jsonl"))
     parser.add_argument("--val-output", type=Path, default=Path("val.jsonl"))
     parser.add_argument("--seed", type=int, default=42)
