@@ -1,5 +1,28 @@
+# Environment files
 .env
 *.env
+*.env.example
+
+# Python cache
 __pycache__/
 *.pyc
-*.env.example
+
+# Virtual environments
+venv/
+.venv/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Model outputs
+outputs/
+checkpoints/
+*.bin
+*.pt
+
+# VS Code
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
