@@ -1,5 +1,57 @@
-.env
-*.env
+# =========================
+# Python
+# =========================
 __pycache__/
 *.pyc
-*.env.example
+*.pyo
+*.pyd
+
+# =========================
+# Virtual Environment
+# =========================
+venv/
+venv311/
+.env
+.env.*
+!.env.example
+
+# =========================
+# ML Models & Checkpoints
+# =========================
+phi2-caption-finetuned/
+phi2-caption-finetuned-merged/
+checkpoint-*/
+runs/
+wandb/
+*.safetensors
+*.bin
+*.pt
+*.pth
+
+# =========================
+# Generated Data Files
+# =========================
+youtube_raw.csv
+insta-dataset/combined_dataset.json
+insta_clean.json
+youtube_ready.jsonl
+instagram_ready.jsonl
+train.jsonl
+val.jsonl
+
+# =========================
+# Logs
+# =========================
+*.log
+
+# =========================
+# IDE
+# =========================
+.vscode/
+.idea/
+
+# =========================
+# OS
+# =========================
+.DS_Store
+Thumbs.db
