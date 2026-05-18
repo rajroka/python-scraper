@@ -130,3 +130,21 @@ SEARCH_QUERIES = [
     "viral motivational speech clips",
     "aesthetic gym motivation edit"
 ]
+
+
+
+
+
+
+# SEARCH_QUERIES = (
+#     FITNESS_QUERIES
+#     + DISCIPLINE_QUERIES
+#     + SUCCESS_QUERIES
+#     + MINDSET_QUERIES
+#     + LIFESTYLE_QUERIES
+#     + SHORT_QUERIES
+#     + MICRO_QUERIES
+#     + INSTAGRAM_QUERIES
+#     + HUMAN_STYLE_QUERIES
+#     + AESTHETIC_QUERIES
+# )

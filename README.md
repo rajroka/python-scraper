@@ -312,11 +312,31 @@ python instagram_to_jsonl.py
 
 ---
 
-### Step 5 — Convert YouTube to JSONL (`youtube_to_jsonl.py`)
+### Step 5 — Clean YouTube data (`clean_youtube.py`)
 
-Cleans the raw YouTube CSV and writes instruction-tuning JSONL records.
+Filters and cleans the raw YouTube CSV into a reviewable `youtube_clean.json` — same `instruction / input / output` format as `insta_clean.json`. **Open and edit this file before Step 5b.**
 
 **Input:** `youtube_raw.csv`  
+**Output:** `youtube_clean.json`
+
+```bash
+python clean_youtube.py
+```
+
+| Argument | Default | Description |
+|---|---|---|
+| `--input` | `youtube_raw.csv` | Input CSV |
+| `--output` | `youtube_clean.json` | Output clean JSON |
+
+> Open `youtube_clean.json` and remove or fix any records that look wrong before running Step 5b.
+
+---
+
+### Step 5b — Convert YouTube to JSONL (`youtube_to_jsonl.py`)
+
+Converts the reviewed `youtube_clean.json` into `youtube_ready.jsonl` (one JSON record per line).
+
+**Input:** `youtube_clean.json`  
 **Output:** `youtube_ready.jsonl`
 
 ```bash
@@ -325,10 +345,10 @@ python youtube_to_jsonl.py
 
 | Argument | Default | Description |
 |---|---|---|
-| `--input` | `youtube_raw.csv` | Input CSV |
+| `--input` | `youtube_clean.json` | Input reviewed JSON |
 | `--output` | `youtube_ready.jsonl` | Output JSONL |
 
-> Steps 4 and 5 are independent — run them in either order.
+> Steps 4 and 5b are independent — run them in either order.
 
 ---
 
@@ -354,7 +374,7 @@ python merge_datasets.py
 
 ---
 
-### Step 7 — Fine-tune the model (`train_model.py`)
+### Step 7 — Fine-tune the model (`finetune_phi2.py`)
 
 Fine-tunes `microsoft/phi-2` on the merged dataset using QLoRA 4-bit quantization. **Requires a CUDA GPU.**
 
@@ -362,13 +382,13 @@ Fine-tunes `microsoft/phi-2` on the merged dataset using QLoRA 4-bit quantizatio
 **Output:** `phi2-caption-finetuned/` (LoRA adapter weights)
 
 ```bash
-python train_model.py
+python finetune_phi2.py
 ```
 
 For lower VRAM (6–8 GB):
 
 ```bash
-python train_model.py --per-device-train-batch-size 1 --gradient-accumulation-steps 16
+python finetune_phi2.py --per-device-train-batch-size 1 --gradient-accumulation-steps 16
 ```
 
 | Argument | Default | Description |
