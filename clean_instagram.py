@@ -1,7 +1,20 @@
 #!/usr/bin/env python3
+
+# =========================================================
+# STRICT INSTAGRAM DATASET CLEANER
+# POSTSATHI DATASET PIPELINE
+#
 # Run:
-# python clean_instagram.py
-# python clean_instagram.py --input insta-dataset/combined_dataset.json --output insta_clean.json
+# python strict_clean_instagram.py
+#
+# Optional:
+# python strict_clean_instagram.py \
+#   --input insta-dataset/combined_dataset.json \
+#   --output insta_clean_strict.json
+#
+# Install:
+# pip install tqdm rapidfuzz
+# =========================================================
 
 from __future__ import annotations
 
@@ -13,6 +26,8 @@ from pathlib import Path
 from typing import Any, Iterable
 from urllib.parse import urlparse
 
+from rapidfuzz.fuzz import ratio
+
 try:
     from tqdm import tqdm
 except ImportError:
@@ -21,16 +36,20 @@ except ImportError:
 
 
 # =========================================================
-# POSTSATHI CONFIG
+# CONFIG
 # =========================================================
 
 INSTRUCTION = (
     "Write an engaging Instagram caption for a fitness and motivation post."
 )
 
-MIN_WORDS = 30
-MAX_WORDS = 50
+MIN_WORDS = 40
+MAX_WORDS = 120
+
+MIN_SENTENCES = 2
 MAX_HASHTAGS = 5
+
+SIMILARITY_THRESHOLD = 88
 
 ALLOWED_TOPICS = [
     "fitness",
@@ -44,6 +63,9 @@ ALLOWED_TOPICS = [
     "consistency",
     "transformation",
     "selfgrowth",
+    "selfimprovement",
+    "growth",
+    "confidence",
 ]
 
 SPAM_WORDS = [
@@ -63,10 +85,43 @@ SPAM_WORDS = [
     "crypto signal",
 ]
 
-BAD_PATTERNS = [
-    r"https?://\S+",
-    r"www\.\S+",
-    r"\$+\d+",
+PROMO_PATTERNS = [
+    r"\+\d{1,3}",
+    r"\bcall\b",
+    r"\bcontact\b",
+    r"\bvisit\b",
+    r"\bbook now\b",
+    r"\bjoin now\b",
+    r"\bavailable now\b",
+    r"\bshop\b",
+    r"\.com\b",
+    r"\.net\b",
+    r"\.io\b",
+]
+
+GENERIC_PHRASES = [
+    "never quit",
+    "stay focused",
+    "trust the process",
+    "stay disciplined",
+    "hard work pays off",
+    "consistency is key",
+    "keep pushing",
+]
+
+CTA_WORDS = [
+    "comment",
+    "share",
+    "follow",
+    "tag someone",
+    "dm me",
+]
+
+AI_PATTERNS = [
+    "the goal is simple",
+    "become better than yesterday",
+    "consistency > perfection",
+    "results come from consistency",
 ]
 
 HASHTAG_RE = re.compile(r"#([A-Za-z0-9_]+)")
@@ -89,16 +144,19 @@ EMOJI_RE = re.compile(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
+
     parser.add_argument(
         "--input",
         type=Path,
         default=Path("insta-dataset/combined_dataset.json"),
     )
+
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("insta_clean.json"),
+        default=Path("insta_clean_strict.json"),
     )
+
     return parser.parse_args()
 
 
@@ -110,6 +168,7 @@ def load_records(path: Path) -> list[dict[str, Any]]:
     try:
         with path.open("r", encoding="utf-8") as f:
             data = json.load(f)
+
     except Exception as exc:
         print(f"ERROR loading JSON: {exc}")
         sys.exit(1)
@@ -127,7 +186,7 @@ def load_records(path: Path) -> list[dict[str, Any]]:
 
 
 # =========================================================
-# CLEANING
+# TEXT CLEANING
 # =========================================================
 
 def repair_mojibake(text: str) -> str:
@@ -147,6 +206,7 @@ def normalize_text(text: str) -> str:
     text = repair_mojibake(text)
 
     text = text.replace("\r", "\n")
+
     text = re.sub(r"\n+", "\n", text)
 
     text = re.sub(r"\s+", " ", text)
@@ -158,6 +218,10 @@ def remove_urls(text: str) -> str:
     return URL_RE.sub("", text)
 
 
+def remove_hashtags(text: str) -> str:
+    return HASHTAG_RE.sub("", text).strip()
+
+
 def remove_extra_emojis(text: str) -> str:
     emojis = EMOJI_RE.findall(text)
 
@@ -165,6 +229,18 @@ def remove_extra_emojis(text: str) -> str:
         text = EMOJI_RE.sub("", text)
 
     return text
+
+
+# =========================================================
+# QUALITY CHECKS
+# =========================================================
+
+def word_count(text: str) -> int:
+    return len(re.findall(r"\b\w+\b", text))
+
+
+def sentence_count(text: str) -> int:
+    return len(re.findall(r"[.!?]+", text))
 
 
 def extract_hashtags(text: str) -> list[str]:
@@ -178,15 +254,7 @@ def extract_hashtags(text: str) -> list[str]:
             seen.add(tag)
             tags.append(tag)
 
-    return tags[:MAX_HASHTAGS]
-
-
-def remove_hashtags(text: str) -> str:
-    return HASHTAG_RE.sub("", text).strip()
-
-
-def word_count(text: str) -> int:
-    return len(re.findall(r"\b\w+\b", text))
+    return tags
 
 
 def contains_spam(text: str) -> bool:
@@ -199,31 +267,104 @@ def contains_spam(text: str) -> bool:
     return False
 
 
+def contains_promo(text: str) -> bool:
+    lower = text.lower()
+
+    for pattern in PROMO_PATTERNS:
+        if re.search(pattern, lower):
+            return True
+
+    return False
+
+
+def too_generic(text: str) -> bool:
+    lower = text.lower()
+
+    matches = sum(
+        phrase in lower
+        for phrase in GENERIC_PHRASES
+    )
+
+    return matches >= 2
+
+
+def excessive_cta(text: str) -> bool:
+    lower = text.lower()
+
+    count = sum(
+        word in lower
+        for word in CTA_WORDS
+    )
+
+    return count >= 2
+
+
+def repetitive_ratio(text: str) -> float:
+    words = re.findall(r"\b\w+\b", text.lower())
+
+    if not words:
+        return 1.0
+
+    unique = len(set(words))
+
+    return unique / len(words)
+
+
+def emoji_ratio(text: str) -> float:
+    emojis = EMOJI_RE.findall(text)
+
+    if not text:
+        return 0
+
+    return len("".join(emojis)) / len(text)
+
+
 def is_english_like(text: str) -> bool:
-    # Strip emojis before ratio check — emojis are non-ASCII
-    # and would unfairly penalise clean English captions
     stripped = EMOJI_RE.sub("", text)
 
     if not stripped:
         return False
 
     english_chars = sum(c.isascii() for c in stripped)
-    ratio = english_chars / len(stripped)
 
-    return ratio > 0.85
+    ratio_ = english_chars / len(stripped)
+
+    return ratio_ > 0.90
 
 
 def topic_relevant(text: str) -> bool:
-    # Require at least 2 topic matches — prevents a single
-    # incidental keyword ("gym" in an ad) from passing
     lower = text.lower()
-    matches = sum(1 for topic in ALLOWED_TOPICS if topic in lower)
+
+    matches = sum(
+        1
+        for topic in ALLOWED_TOPICS
+        if topic in lower
+    )
 
     return matches >= 2
 
 
+def ai_pattern_detected(text: str) -> bool:
+    lower = text.lower()
+
+    matches = sum(
+        pattern in lower
+        for pattern in AI_PATTERNS
+    )
+
+    return matches >= 2
+
+
+# =========================================================
+# CLEAN CAPTION
+# =========================================================
+
 def clean_caption(caption: str) -> str | None:
+
     caption = normalize_text(caption)
+
+    if len(extract_hashtags(caption)) > 8:
+        return None
 
     caption = remove_urls(caption)
 
@@ -234,10 +375,31 @@ def clean_caption(caption: str) -> str | None:
     if contains_spam(caption):
         return None
 
+    if contains_promo(caption):
+        return None
+
+    if excessive_cta(caption):
+        return None
+
+    if too_generic(caption):
+        return None
+
+    if ai_pattern_detected(caption):
+        return None
+
     if not is_english_like(caption):
         return None
 
     if not topic_relevant(caption):
+        return None
+
+    if repetitive_ratio(caption) < 0.58:
+        return None
+
+    if emoji_ratio(caption) > 0.12:
+        return None
+
+    if sentence_count(caption) < MIN_SENTENCES:
         return None
 
     words = word_count(caption)
@@ -253,7 +415,7 @@ def clean_caption(caption: str) -> str | None:
 # =========================================================
 
 def extract_niche(input_url: str) -> str:
-    # Guard against non-URL values (empty string, "N/A", etc.)
+
     if not input_url or not input_url.startswith("http"):
         return ""
 
@@ -271,7 +433,11 @@ def extract_niche(input_url: str) -> str:
     return ""
 
 
-def extract_keywords(record: dict[str, Any], niche: str) -> list[str]:
+def extract_keywords(
+    record: dict[str, Any],
+    niche: str,
+) -> list[str]:
+
     keywords = []
     seen = set()
 
@@ -281,8 +447,11 @@ def extract_keywords(record: dict[str, Any], niche: str) -> list[str]:
         hashtags = HASHTAG_RE.findall(hashtags)
 
     if isinstance(hashtags, list):
+
         for tag in hashtags:
-            tag = str(tag).lower().replace("#", "").strip()
+
+            tag = str(tag).lower()
+            tag = tag.replace("#", "").strip()
 
             if not tag:
                 continue
@@ -290,34 +459,46 @@ def extract_keywords(record: dict[str, Any], niche: str) -> list[str]:
             if tag in seen:
                 continue
 
+            if len(tag) < 3:
+                continue
+
             seen.add(tag)
 
             keywords.append(tag)
 
-            if len(keywords) == 5:
+            if len(keywords) == MAX_HASHTAGS:
                 break
 
-    if niche and niche not in seen and len(keywords) < 5:
+    if niche and niche not in seen:
         keywords.append(niche)
 
-    return keywords[:5]
+    return keywords[:MAX_HASHTAGS]
 
 
 # =========================================================
 # FORMAT OUTPUT
 # =========================================================
 
-def build_output(caption: str, hashtags: list[str]) -> str:
-    caption = caption.strip()
+def build_output(
+    caption: str,
+    hashtags: list[str],
+) -> str:
 
-    hashtags = hashtags[:5]
+    hashtags = hashtags[:MAX_HASHTAGS]
 
-    formatted_tags = " ".join(f"#{x}" for x in hashtags)
+    formatted_tags = " ".join(
+        f"#{x}"
+        for x in hashtags
+    )
 
     return f"{caption}\n\n{formatted_tags}"
 
 
-def make_record(caption: str, keywords: list[str]) -> dict[str, str]:
+def make_record(
+    caption: str,
+    keywords: list[str],
+) -> dict[str, str]:
+
     return {
         "instruction": INSTRUCTION,
         "input": f"Keywords: {', '.join(keywords)}",
@@ -330,6 +511,7 @@ def make_record(caption: str, keywords: list[str]) -> dict[str, str]:
 # =========================================================
 
 def main() -> None:
+
     args = parse_args()
 
     print(f"Loading: {args.input}")
@@ -339,9 +521,10 @@ def main() -> None:
     print(f"Loaded {len(records)} records")
 
     clean_records = []
+
     skipped = 0
 
-    seen_outputs = set()
+    seen_outputs = []
 
     for record in tqdm(records):
 
@@ -357,32 +540,51 @@ def main() -> None:
             skipped += 1
             continue
 
-        if cleaned in seen_outputs:
+        # =========================================
+        # FUZZY DUPLICATE DETECTION
+        # =========================================
+
+        is_duplicate = any(
+            ratio(cleaned, existing) > SIMILARITY_THRESHOLD
+            for existing in seen_outputs
+        )
+
+        if is_duplicate:
             skipped += 1
             continue
 
-        seen_outputs.add(cleaned)
+        seen_outputs.append(cleaned)
 
         niche = extract_niche(
             str(record.get("inputUrl", ""))
         )
 
-        keywords = extract_keywords(record, niche)
+        keywords = extract_keywords(
+            record,
+            niche,
+        )
 
         if len(keywords) < 3:
             keywords.extend([
                 "fitness",
                 "motivation",
-                "mindset"
+                "mindset",
             ])
 
-        keywords = keywords[:5]
+        keywords = keywords[:MAX_HASHTAGS]
 
         clean_records.append(
-            make_record(cleaned, keywords)
+            make_record(
+                cleaned,
+                keywords,
+            )
         )
 
-    with args.output.open("w", encoding="utf-8") as f:
+    with args.output.open(
+        "w",
+        encoding="utf-8",
+    ) as f:
+
         json.dump(
             clean_records,
             f,
@@ -390,9 +592,11 @@ def main() -> None:
             indent=2,
         )
 
-    print(f"\nRecords written: {len(clean_records)}")
+    print("\n=================================")
+    print(f"Records written: {len(clean_records)}")
     print(f"Skipped: {skipped}")
     print(f"Saved to: {args.output}")
+    print("=================================")
 
 
 if __name__ == "__main__":
