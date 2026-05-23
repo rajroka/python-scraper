@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 
 # =========================================================
-# STRICT INSTAGRAM DATASET CLEANER
+# INSTAGRAM DATASET CLEANER
 # POSTSATHI DATASET PIPELINE
 #
 # Run:
-# python strict_clean_instagram.py
+# python clean_instagram.py
 #
 # Optional:
-# python strict_clean_instagram.py \
+# python clean_instagram.py \
 #   --input insta-dataset/combined_dataset.json \
-#   --output insta_clean_strict.json
+#   --output insta_clean.json
 #
 # Install:
 # pip install tqdm rapidfuzz
@@ -268,7 +268,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("insta_clean_strict.json"),
+        default=Path("insta_clean.json"),
     )
     return parser.parse_args()
 
