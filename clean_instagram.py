@@ -43,8 +43,8 @@ INSTRUCTION = (
     "Write an engaging Instagram caption for a fitness and motivation post."
 )
 
-MIN_WORDS         = 40
-MAX_WORDS         = 60
+MIN_WORDS         = 30
+MAX_WORDS         = 40
 MIN_SENTENCES     = 2
 MAX_HASHTAGS      = 5
 MAX_AT_MENTIONS   = 2          # posts with 3+ @mentions → promo/sponsor-heavy
