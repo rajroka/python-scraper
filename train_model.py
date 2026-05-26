@@ -290,7 +290,7 @@ def main() -> None:
 
     print("step 9: starting training (resuming from checkpoint if available)")
     try:
-        trainer.train(resume_from_checkpoint=True)
+        trainer.train()
         print("step 9 done")
     except Exception:
         traceback.print_exc()
@@ -314,7 +314,7 @@ def main() -> None:
         base_model = AutoModelForCausalLM.from_pretrained(
             BASE_MODEL,
             cache_dir=CACHE_DIR,
-            local_files_only=True,  # Use cached model
+            local_files_only=True,
             torch_dtype=torch.float16,
             device_map="auto",
             trust_remote_code=True,
@@ -329,8 +329,29 @@ def main() -> None:
         print("Merge failed but adapter is saved and usable.", file=sys.stderr)
         sys.exit(1)
 
-    print("Fine-tuning complete!")
+    # --- NEW: STEP 12 TO AUTO-UPLOAD TO HUGGING FACE ---
+    print("step 12: uploading merged model to Hugging Face Hub")
+    try:
+        from huggingface_hub import HfApi
+        api = HfApi()
+        
+        # Replace this with your specific Hugging Face account username
+        hf_username = "bhandariKaran" 
+        repo_id = f"{hf_username}/phi2-instagram-captions"
+        
+        print(f"Creating repository: {repo_id}")
+        api.create_repo(repo_id=repo_id, private=True, exist_ok=True)
+        
+        print("Uploading merged model files...")
+        merged_model.push_to_hub(repo_id)
+        tokenizer.push_to_hub(repo_id)
+        print("step 12 done")
+    except Exception:
+        traceback.print_exc()
+        print("Upload failed. Model saved locally but not uploaded.", file=sys.stderr)
+        sys.exit(1)
 
+    print("Fine-tuning and cloud deployment complete!")
 
 if __name__ == "__main__":
     main()
